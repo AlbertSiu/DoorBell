@@ -1,3 +1,19 @@
+#include <ArduinoRobot.h>
+#include <Arduino_LCD.h>
+#include <Compass.h>
+#include <EasyTransfer2.h>
+#include <EEPROM_I2C.h>
+#include <Fat16.h>
+#include <Fat16Config.h>
+#include <Fat16mainpage.h>
+#include <Fat16util.h>
+#include <FatStructs.h>
+#include <Multiplexer.h>
+#include <SdCard.h>
+#include <SdInfo.h>
+#include <Squawk.h>
+#include <SquawkSD.h>
+
 #include <Arduino.h>
 
 #include <WiFi.h>
@@ -11,7 +27,7 @@
 WebServer server(80);
 
 void(* resetFunc) (void) = 0;//declare reset function at address 0
-long wake_up_time=0;
+
 
 String indexhtml = String("") +
                    "<!DOCTYPE html>\n" +
@@ -27,13 +43,27 @@ String indexhtml = String("") +
                    "</body>\n";
 
 bool shouldreboot = false;
-
+long wake_up_time=0;
 bool connect_before=false;
 
 const int BUTTON_PIN = 4;   // Input pin for the pushbutton
 const int BUZZER_PIN = 12;   // Output pin for the buzzer
 bool isPlaying = false;     // Flag to check if the melody is already playing
 #define LEDC_CHANNEL_0     0
+
+void chk_reset(void)
+{
+  delay(1);
+  wake_up_time++;
+  if (connect_before)
+    {
+       if (wake_up_time>7200000) shouldreboot=true;  //One hr chk once
+    }
+   else
+    {
+       if (wake_up_time>1800000) shouldreboot=true;  //Half hr chk once
+    }
+}
 
 void handleResponse() //回调函数
 {
@@ -91,26 +121,35 @@ void setup() {
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
     WiFi.begin("AlbertKitty", "longlong");
-    while (WiFi.status() != WL_CONNECTED)
+    for (int i=0;i<5000;i++) 
     {
         delay(500);
         Serial.print(".");
+        if (WiFi.status() == WL_CONNECTED){ connect_before=true;break;}
     }
+    
+if (connect_before)
+   {
     Serial.println("Connected");
     Serial.print("IP Address:");
     Serial.println(WiFi.localIP());
 
-    server.on("/", HTTP_GET, []() {
-        server.sendHeader("Connection", "close");
-        server.send(200, "text/html", indexhtml); // 发送网页
-    });
 
-    server.on("/update", HTTP_POST, handleResponse, handleFileupload); // 绑定回调函数
-
-    server.begin(); //启动服务器
-
-    Serial.println("Web server started");
-
+      server.on("/", HTTP_GET, []() {
+          server.sendHeader("Connection", "close");
+          server.send(200, "text/html", indexhtml); // 发送网页
+      });
+  
+      server.on("/update", HTTP_POST, handleResponse, handleFileupload); // 绑定回调函数
+  
+      server.begin(); //启动服务器
+  
+      Serial.println("Web server started");
+   }
+    else
+    {
+      Serial.println("No Wifi connected!");
+    }
 }
 
 void update_started() {
@@ -131,9 +170,8 @@ void update_error(int err) {
 
 
 void loop() {
-  delay(1);
-  wake_up_time++;
-  if (wake_up_time>7200000) shouldreboot=true;
+
+  chk_reset();
   
   if (digitalRead(BUTTON_PIN) == LOW && !isPlaying) {
     wake_up_time=0;
@@ -146,7 +184,7 @@ void loop() {
   }
 
   //*************************
-   server.handleClient(); //处理来自客户端的请求
+  if (connect_before) server.handleClient(); //处理来自客户端的请求
 
     if (shouldreboot)
     {
